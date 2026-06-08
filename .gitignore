@@ -1,0 +1,39 @@
+### Linux ###
+*~
+.fuse_hidden*
+.directory
+.Trash-*
+.nfs*
+
+### Hidden Folders ###
+.*/
+
+### VS Code ###
+.vscode/
+.vs/
+
+# Python Stuff
+__pycache__/
+
+### Compiler Stuff ###
+CMakeSettings.json
+
+### Compiled Shaders ###
+*.spv
+
+### Build Stuff ###
+build/
+out/
+bin/
+*.o
+*.a
+*.so
+*.lib
+*.out
+*.exe
+*.app
+
+### Debugging ###
+*.log
+*.dmp
+core
