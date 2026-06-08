@@ -1,5 +1,8 @@
 import random
-from typing import Callable
+from typing import Literal
+
+def get_rand_pref() -> Literal[1, -1]:
+    return (1, -1) if random.random() > 0.5 else (-1, 1)
 
 class ParticleSim:
     def __init__(self, n_rows: int, n_cols: int):
@@ -7,6 +10,9 @@ class ParticleSim:
         self.n_cols = n_cols # columns
 
         self.selected_particle = Sand
+
+        # internal flag used to alternate between the simulation scan happening Left -> Right and Right -> Left
+        self._invert_eval = False
 
     # define what the particle matrix looks like when printed
     def __repr__(self):
@@ -38,8 +44,15 @@ class ParticleSim:
 
         # bottom-up update to prevent double-falling
         for row in reversed(self.matrix):
-            for particle in row:
-                particle.update()
+            if self._invert_eval: # if scanning Left -> Right
+                for particle in row:
+                    particle.update()
+            else: # if scanning Right -> Left
+                for particle in reversed(row):
+                    particle.update()
+        
+        # invert the scan direction flag
+        self._invert_eval = not self._invert_eval
 
     def get_pos(self, row: int, col: int) -> Element | None:
         """
@@ -72,8 +85,8 @@ class ParticleSim:
         if target.ID == Void.ID:
             return True
         
-        # blocked my immovable particles
-        if not target.MOVABLE:
+        # cannot swap with a cell that has already updated
+        if target.has_been_updated:
             return False
         
         # states of matter
@@ -87,6 +100,10 @@ class ParticleSim:
         # solid can pass through all
         # liquid can pass through gas but not solid
         # gas can pass through liquid, gas, solid
+
+        # blocked my immovable particles
+        if not target.MOVABLE:
+            return False
         
         # density rule
         return (source.DENSITY - target.DENSITY) * source.VERTICAL_DIR > 0
@@ -119,7 +136,7 @@ class ParticleSim:
         self.matrix[row][col] = particle(self, (row, col))
 
 class Element:
-    """Particles must define:
+    """All Elements must define:
     - `NAME: str`
     - `ID: int`
     - `COLOR: tuple[int, int, int]` (RGB)
@@ -129,7 +146,7 @@ class Element:
       - -1 = moving up
 
     Optional:
-    - `MOVABLE: bool`
+    - `MOVABLE: bool` (default: True)
     """
     ABSTRACT = False
 
@@ -183,8 +200,22 @@ class Element:
         return f"{self.NAME}:{self.location}"
 
 class Liquid(Element):
+    """All Liquids must define:
+    - `NAME: str`
+    - `ID: int`
+    - `COLOR: tuple[int, int, int]` (RGB)
+    - `DENSITY: int | float` (kg/m^3)
+
+    Optional:
+    - `MOVABLE: bool` (default: True)
+    - `VERTICAL_DIR: int` (1 or -1)
+      - 1 = moving down (default)
+      - -1 = moving up
+    """
     ABSTRACT = True
     VERTICAL_DIR = 1 # down
+
+    DISPERSION_RATE = 5
 
     def update(self):
         if self.has_been_updated:
@@ -192,21 +223,152 @@ class Liquid(Element):
         
         row, col = self.location
 
-        checks = (
-            (row+1, col),   # down
-            (row+1, col-1), # down-left
-            (row+1, col+1), # down-right
-            (row, col-1),   # left
-            (row, col+1),   # right
-        )
+        # randomise whether the particle prefers to move left or right
+        dir_pref = get_rand_pref()
+
+        # Liquids check:
+        # (row+1, col) # down
+        # (row, col-1) # left
+        # (row, col+1) # right
         
-        for dest_row, dest_col in checks:
-            if (target := self.grid.get_pos(dest_row, dest_col)):
-                if self.grid.can_move_into(self, target):
-                    self.grid.swap(self, target)
-                    return
+        # down
+        if (target := self.grid.get_pos(row+1, col)): # check down
+            if self.grid.can_move_into(self, target):
+                self.grid.swap(self, target)
+                return
+        
+        # down-sideways (preferred dir)
+        for side in dir_pref:
+            if (target := self.grid.get_pos(row, col+side)): # check side first (prevent clipping)
+                if self.grid.can_move_into(self, target): # if we can move to the side
+                    if (target := self.grid.get_pos(row+1, col+side)): # then check down and sideways
+                        if self.grid.can_move_into(self, target):
+                            self.grid.swap(self, target)
+                            return
+        
+        # # down-sideways (preferred dir)
+        # if (target := self.grid.get_pos(row, col+(1*dir_pref))): # check side first (prevent clipping)
+        #     if self.grid.can_move_into(self, target): # if we can move to the side
+        #         if (target := self.grid.get_pos(row+1, col+(1*dir_pref))): # then check down and sideways
+        #             if self.grid.can_move_into(self, target):
+        #                 self.grid.swap(self, target)
+        #                 return
+            
+        # # down-sideways (fallback dir)
+        # if (target := self.grid.get_pos(row, col+(-1*dir_pref))): # check side first (prevent clipping)
+        #     if self.grid.can_move_into(self, target): # if we can move to the side
+        #         if (target := self.grid.get_pos(row+1, col+(-1*dir_pref))): # then check down and sideways
+        #             if self.grid.can_move_into(self, target):
+        #                 self.grid.swap(self, target)
+        #                 return
+        
+        # # if we got this far without moving, start trying to disperse sideways
+        # last_valid = None # the last valid swap position found
+
+        # # disperse sideways
+        # for side in dir_pref:
+        #     for i in range(1, self.DISPERSION_RATE+1):
+        #         if (target := self.grid.get_pos(row, col+(i*side))): # check sideways by i
+        #             if self.grid.can_move_into(self, target): # if we can move into that cell
+        #                 # set the last valid position to that cell
+        #                 last_valid = target
+        #             else:
+        #                 break
+        #         else:
+        #             break
+        #     if last_valid: # if there is one, swap into the last valid position
+        #         self.grid.swap(self, last_valid)
+        #         return
+
+        # if we got this far without moving, start trying to disperse sideways
+        last_valid = [] # the last valid swap position found
+
+        # disperse sideways
+        for side in dir_pref:
+            for i in range(1, self.DISPERSION_RATE+1):
+                if (target := self.grid.get_pos(row, col+(i*side))): # check sideways by i
+                    if self.grid.can_move_into(self, target): # if we can move into that cell
+                        # set the last valid position to that cell
+                        last_valid.append(target)
+                    else:
+                        break
+                else:
+                    break
+            if last_valid: # if there is one, swap into the last valid position
+                self.grid.swap(self, random.choice(last_valid))
+                return
+        
+        # # disperse preferred
+        # for i in range(1, self.DISPERSION_RATE+1):
+        #     if (target := self.grid.get_pos(row, col+(1*dir_pref[0]))): # check sideways by i
+        #         if self.grid.can_move_into(self, target): # if we can move into that cell
+        #             # set the last valid position to that cell
+        #             last_valid = target
+        #         else:
+        #             break
+        #     else:
+        #         break
+        
+        # if last_valid: # if there is one, swap into the last valid position
+        #     self.grid.swap(self, last_valid)
+            return
+        
+        # disperse fallback
+        for i in range(1, self.DISPERSION_RATE+1):
+            if (target := self.grid.get_pos(row, col+(-1*dir_pref[0]))): # check sideways by i
+                if self.grid.can_move_into(self, target): # if we can move into that cell
+                    # set the last valid position to that cell
+                    last_valid = target
+                else:
+                    break
+            else:
+                break
+        
+        if last_valid: # if there is one, swap into the last valid position
+            self.grid.swap(self, last_valid)
+            return
+        
+        # # down-left
+        # if (target_l := self.grid.get_pos(row, col-1)): # check left first (prevent clipping)
+        #     if self.grid.can_move_into(self, target_l): # if we can move left
+        #         can_move_left = True # mark left as a valid move, in case we don't move down-left
+        #         if (target := self.grid.get_pos(row+1, col-1)): # then check down-left
+        #             if self.grid.can_move_into(self, target):
+        #                 self.grid.swap(self, target)
+        #                 return
+            
+        # # down-right
+        # if (target_r := self.grid.get_pos(row, col+1)): # check right first (prevent clipping)
+        #     if self.grid.can_move_into(self, target_r): # if we can move right
+        #         can_move_right = True # mark right as a valid move, in case we don't move down-right
+        #         if (target := self.grid.get_pos(row+1, col+1)): # then check down-right
+        #             if self.grid.can_move_into(self, target):
+        #                 self.grid.swap(self, target)
+        #                 return
+        
+        # # left
+        # if can_move_left:
+        #     self.grid.swap(self, target_l)
+        #     return
+        
+        # # right
+        # if can_move_right:
+        #     self.grid.swap(self, target_r)
+        #     return
 
 class Solid(Element):
+    """All Solids must define:
+    - `NAME: str`
+    - `ID: int`
+    - `COLOR: tuple[int, int, int]` (RGB)
+    - `DENSITY: int | float` (kg/m^3)
+
+    Optional:
+    - `MOVABLE: bool` (default: False)
+    - `VERTICAL_DIR: int` (1 or -1)
+      - 1 = moving down (default)
+      - -1 = moving up
+    """
     ABSTRACT = True
     VERTICAL_DIR = 1 # down
 
@@ -216,22 +378,61 @@ class Solid(Element):
         
         row, col = self.location
 
-        checks = (
-            (row+1, col),   # down
-            (row+1, col-1), # down-left
-            (row+1, col+1), # down-right
-        )
+        # Solids check:
+        # (row+1, col)   # down
+        # (row+1, col-1) # down-left
+        # (row+1, col+1) # down-right
         
-        for dest_row, dest_col in checks:
-            if (target := self.grid.get_pos(dest_row, dest_col)):
-                if self.grid.can_move_into(self, target):
-                    self.grid.swap(self, target)
-                    return
+        # down
+        if (target := self.grid.get_pos(row+1, col)): # check down
+            if self.grid.can_move_into(self, target):
+                self.grid.swap(self, target)
+                return
+        
+        # down-left
+        if (target_l := self.grid.get_pos(row, col-1)): # check left first (prevent clipping)
+            if self.grid.can_move_into(self, target_l): # if we can move left
+                if (target := self.grid.get_pos(row+1, col-1)): # then check down-left
+                    if self.grid.can_move_into(self, target):
+                        self.grid.swap(self, target)
+                        return
+            
+        # down-right
+        if (target_r := self.grid.get_pos(row, col+1)): # check right first (prevent clipping)
+            if self.grid.can_move_into(self, target_r): # if we can move right
+                if (target := self.grid.get_pos(row+1, col+1)): # then check down-right
+                    if self.grid.can_move_into(self, target):
+                        self.grid.swap(self, target)
+                        return
 
 class MovableSolid(Solid):
+    """All Movable Solids must define:
+    - `NAME: str`
+    - `ID: int`
+    - `COLOR: tuple[int, int, int]` (RGB)
+    - `DENSITY: int | float` (kg/m^3)
+
+    Optional:
+    - `MOVABLE: bool` (default: False)
+    - `VERTICAL_DIR: int` (1 or -1)
+      - 1 = moving down (default)
+      - -1 = moving up
+    """
     ABSTRACT = True
 
 class ImmovableSolid(Solid):
+    """All Immovable Solids must define:
+    - `NAME: str`
+    - `ID: int`
+    - `COLOR: tuple[int, int, int]` (RGB)
+    - `DENSITY: int | float` (kg/m^3)
+
+    Optional:
+    - `MOVABLE: bool` (default: False)
+    - `VERTICAL_DIR: int` (1 or -1)
+      - 1 = moving down (default, but ignored)
+      - -1 = moving up
+    """
     ABSTRACT = True
 
     MOVABLE = False
@@ -243,6 +444,18 @@ class ImmovableSolid(Solid):
         return
 
 class Gas(Element):
+    """All Gases must define:
+    - `NAME: str`
+    - `ID: int`
+    - `COLOR: tuple[int, int, int]` (RGB)
+    - `DENSITY: int | float` (kg/m^3)
+
+    Optional:
+    - `MOVABLE: bool` (default: False)
+    - `VERTICAL_DIR: int` (1 or -1)
+      - 1 = moving down
+      - -1 = moving up (default)
+    """
     ABSTRACT = True
     VERTICAL_DIR = -1 # up
 
