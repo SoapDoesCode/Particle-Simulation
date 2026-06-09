@@ -129,7 +129,6 @@ class ParticleSim:
         a.has_been_updated = True
         b.has_been_updated = True
 
-
     def replace(self, location: tuple[int, int], particle: Element):
         """Replaces the particle at the given location with one of the given type"""
         row, col = location
