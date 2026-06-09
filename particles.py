@@ -91,6 +91,9 @@ class ParticleSim:
         if isinstance(source, Solid) and isinstance(target, Solid):
             return # don't allow solids to swap with each other
 
+        if isinstance(source, Liquid) and isinstance(target, Gas):
+            return # unsure if this will break anything else, but it fixes gases getting trapped inside liquids
+
         # if source(solid), pass
         # if source(liquid) and target(not solid), pass
         # if source(gas), pass
