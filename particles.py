@@ -42,8 +42,8 @@ class ParticleSim:
         ]
         return self
 
-    def simulate(self):
-        """One simulaton tick"""
+    def step(self):
+        """One simulaton step"""
 
         # reset update flags
         for row in self.matrix:
@@ -115,15 +115,16 @@ class ParticleSim:
 
         Automatically sets `has_been_updated = True` on both particles
         """
-        # print(f"Swapped: {a} and {b}")
-        a_row, a_col = a.location
-        b_row, b_col = b.location
+        # print(f"Swapped: ({a.row}, {a.col}) and ({b.row}, {b.col})")
 
         # swap the particles
-        self.matrix[a_row][a_col], self.matrix[b_row][b_col] = self.matrix[b_row][b_col], self.matrix[a_row][a_col]
+        self.matrix[a.row][a.col], self.matrix[b.row][b.col] = self.matrix[b.row][b.col], self.matrix[a.row][a.col]
 
         # update the particles' self-tracked locations
-        a.location, b.location = b.location, a.location
+        a.row, b.row = b.row, a.row
+        a.col, b.col = b.col, a.col
+        # a.row, a.col = b.row, b.col
+        # b.row, b.col = a.row, a.col
 
         # mark both particles as having been updated
         a.has_been_updated = True
@@ -170,17 +171,17 @@ class Element:
         # ignore abstract classes
         if cls.__dict__.get("ABSTRACT", False):
             return
-        # if getattr(cls, "ABSTRACT", False):
-        #     return
 
         Element.registry.append(cls)
 
-    def __init__(self, grid: ParticleSim, location: list[int, int]):
+    def __init__(self, grid: ParticleSim, location: tuple[int, int]):
         if (self.NAME is None) or (self.ID is None) or (self.COLOR is None) or (self.DENSITY is None) or (self.VERTICAL_DIR is None):
             raise NotImplementedError("""Subclass must define: NAME, ID, COLOR, DENSITY, VERTICAL_DIR""")
         
         self.grid = grid
-        self.location = location # (row, col)
+        # self.location = location # (row, col)
+        self.row = location[0] # vertical position (up/down)
+        self.col = location[1] # horizontal position (left/right)
 
         self.lifetime = 0
         self.velocity: list[int, int] = [0, 0]
@@ -197,7 +198,7 @@ class Element:
             Element._warned.add(cls) # mark this subclass as warned
 
     def __repr__(self):
-        return f"{self.NAME}:{self.location}"
+        return f"{self.NAME}:({self.row}, {self.col})"
 
 class Liquid(Element):
     """All Liquids must define:
@@ -221,8 +222,6 @@ class Liquid(Element):
     def update(self):
         if self.has_been_updated:
             return
-        
-        row, col = self.location
 
         # randomise whether the particle prefers to move left or right
         dir_pref = get_rand_pref()
@@ -233,16 +232,16 @@ class Liquid(Element):
         # -> sideways
         
         # down
-        if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col)): # check down
+        if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col)): # check down
             if self.grid.can_move_into(self, target):
                 self.grid.swap(self, target)
                 return
         
         # diagonal down
         for side in dir_pref:
-            if (target := self.grid.get_pos(row, col+side)): # check side first (prevent clipping)
+            if (target := self.grid.get_pos(self.row, self.col+side)): # check side first (prevent clipping)
                 if self.grid.can_move_into(self, target): # if we can move to the side
-                    if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col+side)): # then check down and sideways
+                    if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col+side)): # then check down and sideways
                         if self.grid.can_move_into(self, target):
                             self.grid.swap(self, target)
                             return
@@ -253,7 +252,7 @@ class Liquid(Element):
         # disperse sideways
         for side in dir_pref:
             for i in range(1, self.MAX_DISPERSION+1):
-                if (target := self.grid.get_pos(row, col+(i*side))): # check sideways by i
+                if (target := self.grid.get_pos(self.row, self.col+(i*side))): # check sideways by i
                     if self.grid.can_move_into(self, target): # if we can move into that cell
                         # set the last valid position to that cell
                         last_valid.append(target)
@@ -284,8 +283,6 @@ class Solid(Element):
     def update(self):
         if self.has_been_updated:
             return
-        
-        row, col = self.location
 
         # Solids check:
         # (row+1, col)   # down
@@ -293,23 +290,23 @@ class Solid(Element):
         # (row+1, col+1) # down-right
         
         # down
-        if (target := self.grid.get_pos(row+1, col)): # check down
+        if (target := self.grid.get_pos(self.row+1, self.col)): # check down
             if self.grid.can_move_into(self, target):
                 self.grid.swap(self, target)
                 return
         
         # down-left
-        if (target_l := self.grid.get_pos(row, col-1)): # check left first (prevent clipping)
+        if (target_l := self.grid.get_pos(self.row, self.col-1)): # check left first (prevent clipping)
             if self.grid.can_move_into(self, target_l): # if we can move left
-                if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col-1)): # then check down-left
+                if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col-1)): # then check down-left
                     if self.grid.can_move_into(self, target):
                         self.grid.swap(self, target)
                         return
             
         # down-right
-        if (target_r := self.grid.get_pos(row, col+1)): # check right first (prevent clipping)
+        if (target_r := self.grid.get_pos(self.row, self.col+1)): # check right first (prevent clipping)
             if self.grid.can_move_into(self, target_r): # if we can move right
-                if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col+1)): # then check down-right
+                if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col+1)): # then check down-right
                     if self.grid.can_move_into(self, target):
                         self.grid.swap(self, target)
                         return
@@ -375,8 +372,6 @@ class Gas(Element):
     def update(self):
         if self.has_been_updated:
             return
-        
-        row, col = self.location
 
         # randomise whether the particle prefers to move left or right
         dir_pref = get_rand_pref()
@@ -387,16 +382,16 @@ class Gas(Element):
         # -> sideways
         
         # up
-        if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col)): # check up
+        if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col)): # check up
             if self.grid.can_move_into(self, target):
                 self.grid.swap(self, target)
                 return
         
         # diagonal up
         for side in dir_pref:
-            if (target := self.grid.get_pos(row, col+side)): # check side first (prevent clipping)
+            if (target := self.grid.get_pos(self.row, self.col+side)): # check side first (prevent clipping)
                 if self.grid.can_move_into(self, target): # if we can move to the side
-                    if (target := self.grid.get_pos(row+self.VERTICAL_DIR, col+side)): # then check diagonal up
+                    if (target := self.grid.get_pos(self.row+self.VERTICAL_DIR, self.col+side)): # then check diagonal up
                         if self.grid.can_move_into(self, target):
                             self.grid.swap(self, target)
                             return
@@ -407,7 +402,7 @@ class Gas(Element):
         # disperse sideways
         for side in dir_pref:
             for i in range(1, self.MAX_DISPERSION+1):
-                if (target := self.grid.get_pos(row, col+(i*side))): # check sideways by i
+                if (target := self.grid.get_pos(self.row, self.col+(i*side))): # check sideways by i
                     if self.grid.can_move_into(self, target): # if we can move into that cell
                         # set the last valid position to that cell
                         last_valid.append(target)

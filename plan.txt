@@ -4,3 +4,4 @@ For physics/velocity, try:
 * moving sideways subtracts 1.0 from velocity for each cell moved
     * if velocity is < 1 but > 0 then make that a random chance to move once and set velocity to 0
     -> e.g., velocity = 0.5 = 50% chance to move, velocity = 0.25 = 25% change to move
+* also per-object bounciness/elasticity (how much it will bounce based on its velocity in that direction)
